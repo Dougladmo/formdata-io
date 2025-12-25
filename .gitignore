@@ -6,3 +6,5 @@ coverage/
 .env
 *.tgz
 .tsbuildinfo
+claudedocs
+CLAUDE.md
