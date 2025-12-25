@@ -1,0 +1,12 @@
+src/
+tests/
+examples/
+tsconfig*.json
+tsup.config.ts
+vitest.config.ts
+.github/
+claudedocs/
+*.test.ts
+.tsbuildinfo
+coverage/
+*.log

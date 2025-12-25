@@ -1,0 +1,7 @@
+# Arquivos de upload (gerados durante testes)
+uploads/
+*.jpg
+*.png
+*.jpeg
+*.gif
+*.webp
