@@ -134,6 +134,111 @@ const formData = payload({
 });
 ```
 
+#### Base64 Converters
+
+Utilities for bidirectional conversion between Files/Blobs and base64 strings, giving you flexibility to choose between FormData/multipart or JSON/base64 approaches.
+
+**`fileToBase64(file: File | Blob): Promise<Base64String>`**
+
+Converts File or Blob to base64 data URI with MIME type preservation.
+
+```typescript
+import { fileToBase64 } from 'formdata-io/client';
+
+const file = new File(['content'], 'doc.txt', { type: 'text/plain' });
+const base64 = await fileToBase64(file);
+// → "data:text/plain;base64,Y29udGVudA=="
+
+// Use in JSON API (no FormData/multipart)
+await fetch('/api/user', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: 'João', avatar: base64 })
+});
+```
+
+**`base64ToBlob(dataUri: Base64String): Blob`**
+
+Converts base64 data URI to Blob with MIME type extraction.
+
+```typescript
+import { base64ToBlob } from 'formdata-io/client';
+
+const dataUri = "data:image/png;base64,iVBORw0KG...";
+const blob = base64ToBlob(dataUri);
+// → Blob { type: "image/png", size: 1234 }
+```
+
+**`base64ToFile(dataUri: Base64String, filename: string): File`**
+
+Converts base64 data URI to File with filename and metadata.
+
+```typescript
+import { base64ToFile } from 'formdata-io/client';
+
+const dataUri = "data:application/pdf;base64,JVBERi0x...";
+const file = base64ToFile(dataUri, 'document.pdf');
+// → File { name: "document.pdf", type: "application/pdf" }
+```
+
+**`blobToFile(blob: Blob, filename: string): File`**
+
+Converts Blob to File with specified filename.
+
+```typescript
+import { blobToFile } from 'formdata-io/client';
+
+const blob = new Blob(['content'], { type: 'text/plain' });
+const file = blobToFile(blob, 'output.txt');
+// → File { name: "output.txt", type: "text/plain" }
+```
+
+**`fileToBlob(file: File): Blob`**
+
+Converts File to Blob for type conversion.
+
+```typescript
+import { fileToBlob } from 'formdata-io/client';
+
+const file = new File(['data'], 'file.txt', { type: 'text/plain' });
+const blob = fileToBlob(file);
+// → Blob { type: "text/plain", size: 4 }
+```
+
+**Supported Formats:**
+- ✅ Images: JPEG, PNG, SVG, WebP, GIF
+- ✅ Documents: PDF, DOCX, XLSX, PPTX
+- ✅ Text files: CSV, TXT, JSON, XML
+- ✅ Media: Video (MP4, WebM), Audio (MP3, WAV)
+- ✅ Any Blob/File type with MIME type preservation
+
+**Use Cases:**
+
+```typescript
+// Option 1: JSON API (no FormData/multipart)
+import { fileToBase64 } from 'formdata-io/client';
+
+const avatar = await fileToBase64(file);
+await fetch('/api/user', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: 'João', avatar })
+});
+
+// Option 2: Traditional multipart (existing behavior)
+import { payload } from 'formdata-io/client';
+
+const formData = payload({ avatar: file });
+await fetch('/api/upload', { method: 'POST', body: formData });
+
+// Bidirectional conversion (File → base64 → File roundtrip)
+import { fileToBase64, base64ToFile } from 'formdata-io/client';
+
+const original = new File(['content'], 'test.txt', { type: 'text/plain' });
+const base64 = await fileToBase64(original);
+const restored = base64ToFile(base64, 'test.txt');
+```
+
 ### Server API
 
 #### `parser(options?)`
@@ -240,6 +345,13 @@ The `payload()` function converts JavaScript objects to FormData by:
 2. **Array handling**: Supports both flat (`tags=a&tags=b`) and indexed (`tags[0]=a`) formats
 3. **Object serialization**: Nested objects are JSON-serialized
 4. **Type conversion**: Booleans, numbers, dates converted to strings
+
+**Base64 Converters** provide alternative file handling:
+
+1. **Bidirectional conversion**: File ↔ Base64 ↔ Blob transformations
+2. **MIME type preservation**: Data URIs maintain original file types
+3. **JSON API support**: Enable file uploads via JSON payloads
+4. **Flexibility**: Choose between FormData/multipart or JSON/base64 approaches
 
 ### Server Side
 
