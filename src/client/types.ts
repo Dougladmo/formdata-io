@@ -1,4 +1,11 @@
 /**
+ * Base64-encoded data URI string format
+ *
+ * @example "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA..."
+ */
+export type Base64String = `data:${string};base64,${string}`;
+
+/**
  * Supported value types for FormData conversion
  */
 export type FormDataValue =
