@@ -6,7 +6,7 @@ import type {
   UploadResult,
 } from './types';
 import { resolveInput } from './utils';
-import { awsUpload, awsDelete } from './providers/aws';
+import { createAwsProvider } from './providers/aws';
 import { supabaseUpload, supabaseDelete } from './providers/supabase';
 
 function validateConfig(config: StorageConfig): void {
@@ -47,31 +47,35 @@ function validateConfig(config: StorageConfig): void {
 export function createStorage(config: StorageConfig): StorageAdapter {
   validateConfig(config);
 
-  async function upload(input: UploadInput, options?: UploadOptions): Promise<UploadResult> {
-    const resolved = resolveInput(input, options);
-    const keyPrefix = options?.keyPrefix;
+  if (config.provider === 'aws') {
+    // Fix #8: S3Client is created once and reused across all upload/delete calls
+    const aws = createAwsProvider(config);
 
-    if (config.provider === 'aws') {
-      return awsUpload(config, resolved, keyPrefix);
-    }
+    const upload = async (input: UploadInput, options?: UploadOptions): Promise<UploadResult> => {
+      const resolved = resolveInput(input, options);
+      return aws.upload(resolved, options?.keyPrefix);
+    };
 
-    return supabaseUpload(config, resolved, keyPrefix);
+    const uploadMany = async (
+      inputs: UploadInput[],
+      options?: UploadOptions
+    ): Promise<UploadResult[]> => Promise.all(inputs.map((i) => upload(i, options)));
+
+    return { upload, uploadMany, delete: aws.delete };
   }
 
-  async function uploadMany(
+  // config is narrowed to SupabaseStorageConfig here
+  const upload = async (input: UploadInput, options?: UploadOptions): Promise<UploadResult> => {
+    const resolved = resolveInput(input, options);
+    return supabaseUpload(config, resolved, options?.keyPrefix);
+  };
+
+  const uploadMany = async (
     inputs: UploadInput[],
     options?: UploadOptions
-  ): Promise<UploadResult[]> {
-    return Promise.all(inputs.map((input) => upload(input, options)));
-  }
+  ): Promise<UploadResult[]> => Promise.all(inputs.map((i) => upload(i, options)));
 
-  async function del(key: string): Promise<void> {
-    if (config.provider === 'aws') {
-      return awsDelete(config, key);
-    }
-
-    return supabaseDelete(config, key);
-  }
+  const del = async (key: string): Promise<void> => supabaseDelete(config, key);
 
   return { upload, uploadMany, delete: del };
 }

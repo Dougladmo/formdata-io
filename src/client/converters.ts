@@ -1,5 +1,34 @@
 import type { Base64String } from './types'
 
+const DATA_URI_MAX_LENGTH = 100 * 1024 * 1024; // 100 MB
+const REGEX_TIMEOUT_MS = 100; // 100 ms — threshold para detecção no browser
+
+/**
+ * Executa um regex com detecção de timeout via performance.now().
+ * Importante: no browser não é possível interromper um regex síncrono em execução;
+ * o erro é lançado *após* a execução terminar, não durante. A proteção real é o
+ * limite de tamanho da entrada — entradas grandes são rejeitadas antes do match.
+ * Também rejeita entradas acima do tamanho máximo permitido.
+ */
+function matchWithTimeout(
+  input: string,
+  pattern: RegExp,
+  timeoutMs = REGEX_TIMEOUT_MS
+): RegExpMatchArray | null {
+  if (input.length > DATA_URI_MAX_LENGTH) {
+    throw new Error(
+      `Input length (${input.length}) exceeds maximum allowed (${DATA_URI_MAX_LENGTH} bytes)`
+    );
+  }
+  const start = performance.now()
+  const result = input.match(pattern)
+  const elapsed = performance.now() - start
+  if (elapsed > timeoutMs) {
+    throw new Error(`RegExp execution timed out after ${timeoutMs}ms`)
+  }
+  return result
+}
+
 /**
  * Converts a File or Blob to a base64-encoded data URI string.
  *
@@ -49,13 +78,24 @@ export function base64ToBlob(dataUri: Base64String): Blob {
     throw new Error('Invalid data URI format')
   }
 
-  const mimeMatch = parts[0].match(/:(.*?);/)
+  const header = parts[0]
+  const base64Data = parts[1]
+
+  // Fix #12: reject non-base64 data URIs (e.g. data:text/plain;charset=utf-8,hello)
+  // before calling atob(), which would throw a cryptic DOMException.
+  if (!header.includes(';base64')) {
+    throw new Error(
+      'Invalid data URI: only base64-encoded data URIs are supported. ' +
+        'Expected format: data:{mimetype};base64,{data}'
+    )
+  }
+
+  const mimeMatch = matchWithTimeout(header, /:(.*?);/)
   if (!mimeMatch) {
     throw new Error('Invalid data URI: missing MIME type')
   }
 
   const mimeType = mimeMatch[1]
-  const base64Data = parts[1]
 
   // Decode base64 to binary
   const binaryString = atob(base64Data)

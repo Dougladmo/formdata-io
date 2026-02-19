@@ -7,8 +7,7 @@ import type { ParsedFile } from '../../src/server/types';
 // ---------------------------------------------------------------------------
 
 vi.mock('../../src/storage/providers/aws', () => ({
-  awsUpload: vi.fn(),
-  awsDelete: vi.fn(),
+  createAwsProvider: vi.fn(),
 }));
 
 vi.mock('../../src/storage/providers/supabase', () => ({
@@ -24,11 +23,10 @@ vi.mock('crypto', async (importOriginal) => {
   };
 });
 
-import { awsUpload, awsDelete } from '../../src/storage/providers/aws';
+import { createAwsProvider } from '../../src/storage/providers/aws';
 import { supabaseUpload, supabaseDelete } from '../../src/storage/providers/supabase';
 
-const mockAwsUpload = vi.mocked(awsUpload);
-const mockAwsDelete = vi.mocked(awsDelete);
+const mockCreateAwsProvider = vi.mocked(createAwsProvider);
 const mockSupabaseUpload = vi.mocked(supabaseUpload);
 const mockSupabaseDelete = vi.mocked(supabaseDelete);
 
@@ -72,11 +70,24 @@ const mockUploadResult = {
 // ---------------------------------------------------------------------------
 
 describe('createStorage', () => {
+  let mockProviderUpload: ReturnType<typeof vi.fn>;
+  let mockProviderDelete: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAwsUpload.mockResolvedValue(mockUploadResult);
-    mockAwsDelete.mockResolvedValue(undefined);
-    mockSupabaseUpload.mockResolvedValue({ ...mockUploadResult, url: 'https://project.supabase.co/storage/v1/object/public/avatars/test-uuid-1234-photo.jpg' });
+
+    mockProviderUpload = vi.fn().mockResolvedValue(mockUploadResult);
+    mockProviderDelete = vi.fn().mockResolvedValue(undefined);
+
+    mockCreateAwsProvider.mockReturnValue({
+      upload: mockProviderUpload,
+      delete: mockProviderDelete,
+    });
+
+    mockSupabaseUpload.mockResolvedValue({
+      ...mockUploadResult,
+      url: 'https://project.supabase.co/storage/v1/object/public/avatars/test-uuid-1234-photo.jpg',
+    });
     mockSupabaseDelete.mockResolvedValue(undefined);
   });
 
@@ -137,17 +148,18 @@ describe('createStorage', () => {
   });
 
   describe('upload(ParsedFile)', () => {
-    it('calls awsUpload with resolved input for AWS provider', async () => {
+    it('creates AWS provider with config and calls upload with resolved input', async () => {
       const storage = createStorage(awsConfig);
       const result = await storage.upload(parsedFile);
 
-      expect(mockAwsUpload).toHaveBeenCalledOnce();
-      const [calledConfig, resolvedInput] = mockAwsUpload.mock.calls[0];
-      expect(calledConfig).toEqual(awsConfig);
+      expect(mockCreateAwsProvider).toHaveBeenCalledWith(awsConfig);
+      expect(mockProviderUpload).toHaveBeenCalledOnce();
+      const [resolvedInput, keyPrefix] = mockProviderUpload.mock.calls[0];
       expect(resolvedInput.buffer).toEqual(parsedFile.buffer);
       expect(resolvedInput.filename).toBe('photo.jpg');
       expect(resolvedInput.mimetype).toBe('image/jpeg');
       expect(resolvedInput.size).toBe(1024);
+      expect(keyPrefix).toBeUndefined();
       expect(result).toEqual(mockUploadResult);
     });
 
@@ -165,7 +177,7 @@ describe('createStorage', () => {
       const storage = createStorage(awsConfig);
       await storage.upload(parsedFile, { keyPrefix: 'overridden/' });
 
-      const [, , keyPrefix] = mockAwsUpload.mock.calls[0];
+      const [, keyPrefix] = mockProviderUpload.mock.calls[0];
       expect(keyPrefix).toBe('overridden/');
     });
   });
@@ -178,8 +190,8 @@ describe('createStorage', () => {
       const storage = createStorage(awsConfig);
       await storage.upload(base64Image, { filename: 'image.png' });
 
-      expect(mockAwsUpload).toHaveBeenCalledOnce();
-      const [, resolvedInput] = mockAwsUpload.mock.calls[0];
+      expect(mockProviderUpload).toHaveBeenCalledOnce();
+      const [resolvedInput] = mockProviderUpload.mock.calls[0];
       expect(Buffer.isBuffer(resolvedInput.buffer)).toBe(true);
       expect(resolvedInput.filename).toBe('image.png');
       expect(resolvedInput.mimetype).toBe('image/png');
@@ -200,8 +212,8 @@ describe('createStorage', () => {
       const storage = createStorage(awsConfig);
       await storage.upload(buf, { filename: 'doc.pdf', mimetype: 'application/pdf' });
 
-      expect(mockAwsUpload).toHaveBeenCalledOnce();
-      const [, resolvedInput] = mockAwsUpload.mock.calls[0];
+      expect(mockProviderUpload).toHaveBeenCalledOnce();
+      const [resolvedInput] = mockProviderUpload.mock.calls[0];
       expect(resolvedInput.buffer).toBe(buf);
       expect(resolvedInput.filename).toBe('doc.pdf');
       expect(resolvedInput.mimetype).toBe('application/pdf');
@@ -211,7 +223,7 @@ describe('createStorage', () => {
       const storage = createStorage(awsConfig);
       await storage.upload(buf, { filename: 'data.bin' });
 
-      const [, resolvedInput] = mockAwsUpload.mock.calls[0];
+      const [resolvedInput] = mockProviderUpload.mock.calls[0];
       expect(resolvedInput.mimetype).toBe('application/octet-stream');
     });
 
@@ -229,7 +241,7 @@ describe('createStorage', () => {
       const file2: ParsedFile = { ...parsedFile, originalname: 'photo2.jpg' };
       const results = await storage.uploadMany([parsedFile, file2]);
 
-      expect(mockAwsUpload).toHaveBeenCalledTimes(2);
+      expect(mockProviderUpload).toHaveBeenCalledTimes(2);
       expect(results).toHaveLength(2);
     });
 
@@ -238,7 +250,7 @@ describe('createStorage', () => {
       let resolveSecond!: () => void;
       const order: number[] = [];
 
-      mockAwsUpload
+      mockProviderUpload
         .mockImplementationOnce(
           () =>
             new Promise((res) => {
@@ -272,11 +284,11 @@ describe('createStorage', () => {
   });
 
   describe('delete', () => {
-    it('calls awsDelete with the correct key for AWS', async () => {
+    it('calls provider delete with the correct key for AWS', async () => {
       const storage = createStorage(awsConfig);
       await storage.delete('avatars/test-uuid-photo.jpg');
 
-      expect(mockAwsDelete).toHaveBeenCalledWith(awsConfig, 'avatars/test-uuid-photo.jpg');
+      expect(mockProviderDelete).toHaveBeenCalledWith('avatars/test-uuid-photo.jpg');
     });
 
     it('calls supabaseDelete with the correct key for Supabase', async () => {
@@ -292,12 +304,32 @@ describe('createStorage', () => {
 });
 
 describe('generateKey (via resolveInput integration)', () => {
-  it('prefixes key with keyPrefix from config', async () => {
-    const storage = createStorage({ ...awsConfig, keyPrefix: 'avatars/' });
+  let mockProviderUpload: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockProviderUpload = vi.fn().mockResolvedValue({
+      url: '',
+      key: '',
+      size: 0,
+      mimetype: '',
+    });
+    vi.mocked(createAwsProvider).mockReturnValue({
+      upload: mockProviderUpload,
+      delete: vi.fn(),
+    });
+  });
+
+  it('config keyPrefix is captured in the provider closure (no per-call keyPrefix)', async () => {
+    const configWithPrefix = { ...awsConfig, keyPrefix: 'avatars/' };
+    const storage = createStorage(configWithPrefix);
+
+    expect(vi.mocked(createAwsProvider)).toHaveBeenCalledWith(configWithPrefix);
+
     await storage.upload(parsedFile);
 
-    const [, , keyPrefix] = mockAwsUpload.mock.calls[0];
-    // keyPrefix arg should be undefined (comes from config, handled inside provider)
+    // per-call keyPrefix arg is undefined; the config prefix is handled inside the provider
+    const [, keyPrefix] = mockProviderUpload.mock.calls[0];
     expect(keyPrefix).toBeUndefined();
   });
 });

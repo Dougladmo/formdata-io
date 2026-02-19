@@ -1,4 +1,4 @@
-import type { FormDataPayload, PayloadOptions } from './types';
+import type { FormDataPayload, FormDataValue, PayloadOptions } from './types';
 import {
   isFileOrBlob,
   isPlainObject,
@@ -81,8 +81,10 @@ export function payload(
       return;
     }
 
-    // Case 4: Primitives (string, number, boolean, null, undefined, Date)
-    const stringValue = valueToString(value as any, opts);
+    // Case 4: Primitives (string, number, boolean, null, undefined, Date).
+    // At this point File/Blob, Array, and plain object have all been handled,
+    // so value is guaranteed to be a FormDataValue primitive.
+    const stringValue = valueToString(value as FormDataValue, opts);
     if (stringValue !== undefined) {
       formData.append(key, stringValue);
     }

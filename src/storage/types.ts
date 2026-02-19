@@ -6,8 +6,18 @@ export interface AWSStorageConfig {
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
+  /**
+   * Session token for temporary credentials (STS, IAM roles on EC2/Lambda/ECS/EKS).
+   * Required when using short-lived credentials from AWS STS or instance profiles.
+   */
+  sessionToken?: string;
   endpoint?: string;
   keyPrefix?: string;
+  /**
+   * S3 Object ACL. Note: since April 2023 new buckets have Object Ownership set to
+   * "Bucket owner enforced" by default, which disables ACLs entirely. Setting this
+   * option on such buckets will throw an `AccessControlListNotSupported` error.
+   */
   acl?: 'public-read' | 'private';
 }
 
@@ -17,6 +27,19 @@ export interface SupabaseStorageConfig {
   url: string;
   serviceKey: string;
   keyPrefix?: string;
+  /**
+   * Whether the bucket is public. Defaults to `true`.
+   *
+   * When `true`, `UploadResult.url` is the full public URL
+   * (`/storage/v1/object/public/{bucket}/{key}`).
+   *
+   * When `false`, `UploadResult.url` contains only the storage key.
+   * Callers are responsible for generating a signed URL via the Supabase client
+   * or REST API before serving the file to end users.
+   *
+   * @default true
+   */
+  publicBucket?: boolean;
 }
 
 export type StorageConfig = AWSStorageConfig | SupabaseStorageConfig;

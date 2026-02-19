@@ -5,6 +5,9 @@ import type { ParsedFile, ParsedPayload, ParserOptions } from './types';
 const DEFAULT_OPTIONS: Required<ParserOptions> = {
   maxFileSize: 10 * 1024 * 1024, // 10MB
   maxFiles: 10,
+  maxFields: 100,
+  maxFieldSize: 64 * 1024, // 64KB
+  maxTotalFileSize: Infinity,
   autoParseJSON: true,
   autoParseNumbers: true,
   autoParseBooleans: true,
@@ -76,20 +79,18 @@ function autoParse(
     }
   }
 
-  // 2. Try boolean conversion
-  if (options.autoParseBooleans) {
-    if (value === 'true') return true;
-    if (value === 'false') return false;
-    if (value === '1') return true;
-    if (value === '0') return false;
-  }
-
-  // 3. Try number conversion
+  // 2. Try number conversion (before boolean so "1"/"0" parse as numbers, not booleans)
   if (options.autoParseNumbers) {
     const num = Number(value);
     if (!isNaN(num) && value.trim() !== '') {
       return num;
     }
+  }
+
+  // 3. Try boolean conversion (only for unambiguous string literals)
+  if (options.autoParseBooleans) {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
   }
 
   // 4. Return as string
@@ -125,6 +126,7 @@ export function parseMultipart(
     const files: ParsedFile[] = [];
     let fileCount = 0;
     let hasError = false;
+    let totalFileSize = 0;
 
     // Validate content-type header
     const contentType = req.headers['content-type'];
@@ -137,6 +139,8 @@ export function parseMultipart(
       limits: {
         fileSize: opts.maxFileSize,
         files: opts.maxFiles,
+        fields: opts.maxFields,
+        fieldSize: opts.maxFieldSize,
       },
     });
 
@@ -177,8 +181,9 @@ export function parseMultipart(
           }
 
           size += chunk.length;
+          totalFileSize += chunk.length;
 
-          // Enforce size limit
+          // Enforce per-file size limit
           if (size > opts.maxFileSize) {
             fileSizeExceeded = true;
             hasError = true;
@@ -186,6 +191,19 @@ export function parseMultipart(
             reject(
               new Error(
                 `File size exceeds limit of ${opts.maxFileSize} bytes`
+              )
+            );
+            return;
+          }
+
+          // Enforce total combined file size limit
+          if (opts.maxTotalFileSize !== Infinity && totalFileSize > opts.maxTotalFileSize) {
+            fileSizeExceeded = true;
+            hasError = true;
+            file.resume();
+            reject(
+              new Error(
+                `Total file size exceeds limit of ${opts.maxTotalFileSize} bytes`
               )
             );
             return;
@@ -217,13 +235,17 @@ export function parseMultipart(
       }
     );
 
-    // Handler for limit exceeded
+    // Handler for limit exceeded (busboy emits this when fileSize limit is hit)
     busboy.on('limit', () => {
+      if (hasError) return; // avoid double-reject when data handler already rejected
+      hasError = true;
       reject(new Error('File size limit exceeded'));
     });
 
     // Handler for parsing completion
     busboy.on('finish', () => {
+      if (hasError) return;
+
       // Normalize files into payload
       files.forEach((file) => {
         normalizeField(payload, file.fieldname, file);

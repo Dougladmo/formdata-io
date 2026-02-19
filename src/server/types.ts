@@ -93,12 +93,39 @@ export interface ParserOptions {
    *
    * @example
    * ```typescript
-   * // Field value: 'true' or '1'
-   * // autoParseBooleans: true → true
-   * // autoParseBooleans: false → 'true'
+   * // Field value: 'true' or 'false'
+   * // autoParseBooleans: true → true / false
+   * // autoParseBooleans: false → 'true' / 'false'
    * ```
    */
   autoParseBooleans?: boolean;
+
+  /**
+   * Maximum number of text fields allowed per request
+   *
+   * Prevents denial-of-service via excessive field counts.
+   *
+   * @default 100
+   */
+  maxFields?: number;
+
+  /**
+   * Maximum size of each text field value in bytes
+   *
+   * @default 65536 (64 KB)
+   */
+  maxFieldSize?: number;
+
+  /**
+   * Maximum combined size of all uploaded files in bytes
+   *
+   * Limits total memory usage across all files in a single request.
+   * With the defaults (10 files × 10 MB each), a single request could
+   * allocate up to 100 MB; set this to cap that.
+   *
+   * @default Infinity
+   */
+  maxTotalFileSize?: number;
 }
 
 /**

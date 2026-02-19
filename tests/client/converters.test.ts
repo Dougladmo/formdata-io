@@ -91,8 +91,15 @@ describe('base64ToBlob', () => {
     expect(() => base64ToBlob(invalid)).toThrow('Invalid data URI format');
   });
 
-  it('throws error for missing MIME type', () => {
+  it('throws a clear error for non-base64 data URIs (missing ;base64 marker)', () => {
+    // data:base64,... has no ;base64 marker — catches fix #12: clear error before atob()
     const invalid = 'data:base64,aGVsbG8=' as Base64String;
+    expect(() => base64ToBlob(invalid)).toThrow('only base64-encoded data URIs are supported');
+  });
+
+  it('throws error for missing MIME type', () => {
+    // header has ;base64 but no MIME type (e.g. ";base64,data")
+    const invalid = ';base64,aGVsbG8=' as Base64String;
     expect(() => base64ToBlob(invalid)).toThrow('Invalid data URI: missing MIME type');
   });
 });

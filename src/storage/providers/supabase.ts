@@ -1,5 +1,4 @@
-import type { SupabaseStorageConfig, UploadResult } from '../types';
-import type { ResolvedInput } from '../types';
+import type { ResolvedInput, SupabaseStorageConfig, UploadResult } from '../types';
 import { generateKey } from '../utils';
 
 export async function supabaseUpload(
@@ -7,10 +6,13 @@ export async function supabaseUpload(
   resolved: ResolvedInput,
   keyPrefix?: string
 ): Promise<UploadResult> {
+  // Fix #2: strip trailing slash to prevent double-slash in constructed URLs
+  const baseUrl = config.url.replace(/\/$/, '');
+
   const prefix = keyPrefix ?? config.keyPrefix;
   const key = generateKey(resolved.filename, prefix);
 
-  const uploadUrl = `${config.url}/storage/v1/object/${config.bucket}/${key}`;
+  const uploadUrl = `${baseUrl}/storage/v1/object/${config.bucket}/${key}`;
 
   const response = await fetch(uploadUrl, {
     method: 'POST',
@@ -27,7 +29,13 @@ export async function supabaseUpload(
     throw new Error(`Supabase Storage upload failed (${response.status}): ${text}`);
   }
 
-  const url = `${config.url}/storage/v1/object/public/${config.bucket}/${key}`;
+  // Fix #3: only construct the public URL when the bucket is public (default: true).
+  // Private buckets require a signed URL — return the key so callers can generate one
+  // via `supabase.storage.from(bucket).createSignedUrl(key, expiresIn)`.
+  const isPublic = config.publicBucket !== false;
+  const url = isPublic
+    ? `${baseUrl}/storage/v1/object/public/${config.bucket}/${key}`
+    : key;
 
   return {
     url,
@@ -41,7 +49,9 @@ export async function supabaseDelete(
   config: SupabaseStorageConfig,
   key: string
 ): Promise<void> {
-  const deleteUrl = `${config.url}/storage/v1/object/${config.bucket}`;
+  // Fix #2: strip trailing slash
+  const baseUrl = config.url.replace(/\/$/, '');
+  const deleteUrl = `${baseUrl}/storage/v1/object/${config.bucket}`;
 
   const response = await fetch(deleteUrl, {
     method: 'DELETE',
