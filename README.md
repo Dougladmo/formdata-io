@@ -1,6 +1,6 @@
 # 🚀 FormData IO
 
-> TypeScript-first library for seamless FormData handling in frontend and backend.
+> TypeScript-first library for seamless FormData handling in frontend and backend — plus cloud storage for AWS S3 and Supabase.
 
 [![npm version](https://img.shields.io/npm/v/formdata-io.svg)](https://www.npmjs.com/package/formdata-io)
 [![Bundle size](https://img.shields.io/bundlephobia/minzip/formdata-io)](https://bundlephobia.com/package/formdata-io)
@@ -25,12 +25,25 @@ const formData = payload({ name: "João", avatar: file });
 app.post('/upload', parser(), (req, res) => {
   const { name, avatar } = req.payload; // ✨ Type-safe!
 });
+
+// Storage: Upload to S3 or Supabase in one line
+const result = await storage.upload(avatar);
+console.log(result.url); // "https://bucket.s3.us-east-1.amazonaws.com/..."
 ```
 
 ## Installation
 
 ```bash
 npm install formdata-io
+```
+
+**Optional peer dependencies** (install only what you need):
+
+```bash
+# For AWS S3 storage
+npm install @aws-sdk/client-s3
+
+# Supabase Storage uses native fetch — no extra dependencies needed
 ```
 
 ## Quick Start
@@ -76,6 +89,27 @@ app.post('/api/upload', parser(), (req, res) => {
   console.log(metadata); // { source: "web" } (auto-parsed JSON)
 
   res.json({ success: true });
+});
+```
+
+### Storage (AWS S3 or Supabase)
+
+```typescript
+import { parser } from 'formdata-io/server';
+import { createStorage } from 'formdata-io/storage';
+
+const storage = createStorage({
+  provider: 'aws',
+  bucket: process.env.AWS_BUCKET!,
+  region: process.env.AWS_REGION!,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+});
+
+app.post('/api/upload', parser(), async (req, res) => {
+  const { avatar } = req.payload;
+  const result = await storage.upload(avatar);
+  res.json({ url: result.url });
 });
 ```
 
@@ -251,20 +285,22 @@ Express middleware for parsing multipart/form-data.
 **Returns:** Express middleware function
 
 **Options:**
-```typescript
-{
-  maxFileSize: number;      // Max file size in bytes (default: 10MB)
-  maxFiles: number;         // Max number of files (default: 10)
-  autoParseJSON: boolean;   // Auto-parse JSON strings (default: true)
-  autoParseNumbers: boolean; // Auto-convert numeric strings (default: true)
-  autoParseBooleans: boolean; // Auto-convert "true"/"false" (default: true)
-}
-```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxFileSize` | `number` | `10485760` (10MB) | Max size per file in bytes |
+| `maxFiles` | `number` | `10` | Max number of files per request |
+| `maxFields` | `number` | `100` | Max number of text fields per request |
+| `maxFieldSize` | `number` | `65536` (64KB) | Max size of each text field in bytes |
+| `maxTotalFileSize` | `number` | `Infinity` | Combined size limit for all files in bytes |
+| `autoParseJSON` | `boolean` | `true` | Auto-parse JSON strings to objects |
+| `autoParseNumbers` | `boolean` | `true` | Auto-convert numeric strings to numbers |
+| `autoParseBooleans` | `boolean` | `true` | Auto-convert "true"/"false" to booleans |
 
 **Examples:**
 
 ```typescript
-// Default options (10MB, 10 files)
+// Default options (10MB per file, 10 files, 100 fields)
 app.post('/upload', parser(), (req, res) => {
   // req.payload contains all fields and files
 });
@@ -274,10 +310,32 @@ app.post('/photos', parser({ maxFileSize: 50 * 1024 * 1024 }), (req, res) => {
   // Allow up to 50MB files
 });
 
+// Cap total upload size (e.g. gallery endpoint)
+app.post('/gallery', parser({ maxTotalFileSize: 100 * 1024 * 1024 }), (req, res) => {
+  // All files combined must be under 100MB
+});
+
+// Limit text fields to prevent DoS
+app.post('/form', parser({ maxFields: 20, maxFieldSize: 8 * 1024 }), (req, res) => {
+  // Max 20 fields, each up to 8KB
+});
+
 // Disable auto-parsing
 app.post('/raw', parser({ autoParseJSON: false }), (req, res) => {
   // All fields remain as strings
 });
+```
+
+#### `parseMultipart(req, options?)`
+
+Lower-level function that parses a multipart request and returns a promise — useful when you need direct control outside of Express middleware.
+
+```typescript
+import { parseMultipart } from 'formdata-io/server';
+
+// Inside a custom handler or framework adapter
+const payload = await parseMultipart(req, { maxFiles: 5 });
+console.log(payload.avatar); // ParsedFile
 ```
 
 #### `ParsedFile` Interface
@@ -293,20 +351,226 @@ interface ParsedFile {
 }
 ```
 
+### Storage API
+
+The `formdata-io/storage` package provides a unified adapter for uploading and deleting files on AWS S3 and Supabase Storage.
+
+#### `createStorage(config)`
+
+Factory function that returns a `StorageAdapter` for the configured provider.
+
+```typescript
+import { createStorage } from 'formdata-io/storage';
+
+const storage = createStorage(config);
+```
+
+**AWS S3 config:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | `'aws'` | ✅ | Provider identifier |
+| `bucket` | `string` | ✅ | S3 bucket name |
+| `region` | `string` | ✅ | AWS region (e.g. `'us-east-1'`) |
+| `accessKeyId` | `string` | ✅ | AWS access key ID |
+| `secretAccessKey` | `string` | ✅ | AWS secret access key |
+| `sessionToken` | `string` | — | STS/IAM temporary session token |
+| `endpoint` | `string` | — | Custom endpoint for S3-compatible providers |
+| `keyPrefix` | `string` | — | Default path prefix for all keys |
+| `acl` | `'public-read' \| 'private'` | — | Object ACL (see note below) |
+
+> **ACL note:** Since April 2023, new S3 buckets have Object Ownership set to "Bucket owner enforced", which disables ACLs entirely. Setting `acl` on such buckets throws an `AccessControlListNotSupported` error. Either remove the `acl` option or change the bucket's Object Ownership setting in the S3 console.
+
+```typescript
+// .env
+// AWS_BUCKET=my-bucket
+// AWS_REGION=us-east-1
+// AWS_ACCESS_KEY_ID=AKIA...
+// AWS_SECRET_ACCESS_KEY=...
+
+const storage = createStorage({
+  provider: 'aws',
+  bucket: process.env.AWS_BUCKET!,
+  region: process.env.AWS_REGION!,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  keyPrefix: 'uploads',
+});
+```
+
+**Supabase Storage config:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `provider` | `'supabase'` | ✅ | Provider identifier |
+| `bucket` | `string` | ✅ | Supabase storage bucket name |
+| `url` | `string` | ✅ | Supabase project URL |
+| `serviceKey` | `string` | ✅ | Supabase service role key |
+| `keyPrefix` | `string` | — | Default path prefix for all keys |
+| `publicBucket` | `boolean` | — | Whether the bucket is public (default: `true`) |
+
+> When `publicBucket` is `true`, `UploadResult.url` is the full public URL. When `false`, `url` contains only the storage key and you are responsible for generating a signed URL via the Supabase client before serving the file.
+
+```typescript
+// .env
+// SUPABASE_URL=https://xyz.supabase.co
+// SUPABASE_SERVICE_KEY=eyJ...
+
+const storage = createStorage({
+  provider: 'supabase',
+  bucket: 'avatars',
+  url: process.env.SUPABASE_URL!,
+  serviceKey: process.env.SUPABASE_SERVICE_KEY!,
+  keyPrefix: 'users',
+});
+```
+
+#### `storage.upload(input, options?)`
+
+Uploads a single file and returns an `UploadResult`.
+
+**`UploadInput`** — accepts three forms:
+- `ParsedFile` — file parsed by `parser()` middleware (preferred)
+- `Buffer` — raw buffer (requires `filename` in options)
+- `string` — base64 data URI (requires `filename` in options)
+
+**`UploadOptions`:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `filename` | `string` | Required for Buffer and base64 inputs |
+| `mimetype` | `string` | Override detected MIME type |
+| `keyPrefix` | `string` | Override key prefix for this upload only |
+
+**`UploadResult`:**
+
+```typescript
+interface UploadResult {
+  url: string;      // Public URL (or key for private Supabase buckets)
+  key: string;      // Storage key: "{prefix}/{uuid}-{sanitized-filename}"
+  size: number;     // File size in bytes
+  mimetype: string; // MIME type
+}
+```
+
+**Examples:**
+
+```typescript
+// Upload a ParsedFile from parser()
+const result = await storage.upload(req.payload.avatar);
+console.log(result.url);     // "https://bucket.s3.us-east-1.amazonaws.com/uploads/abc-avatar.jpg"
+console.log(result.key);     // "uploads/abc123-avatar.jpg"
+console.log(result.size);    // 204800
+console.log(result.mimetype); // "image/jpeg"
+
+// Upload a Buffer
+const result = await storage.upload(buffer, {
+  filename: 'report.pdf',
+  mimetype: 'application/pdf',
+});
+
+// Upload a base64 data URI
+const result = await storage.upload(dataUri, { filename: 'photo.png' });
+```
+
+#### `storage.uploadMany(inputs, options?)`
+
+Uploads multiple files in parallel and returns an array of `UploadResult`.
+
+```typescript
+const files = [req.payload.photo1, req.payload.photo2, req.payload.photo3];
+const results = await storage.uploadMany(files);
+// → [{ url, key, size, mimetype }, ...]
+```
+
+#### `storage.delete(key)`
+
+Deletes a file by its storage key.
+
+```typescript
+await storage.delete('uploads/abc123-avatar.jpg');
+```
+
+#### End-to-end Express example
+
+```typescript
+import express from 'express';
+import { parser } from 'formdata-io/server';
+import { createStorage } from 'formdata-io/storage';
+
+const app = express();
+
+const storage = createStorage({
+  provider: 'aws',
+  bucket: process.env.AWS_BUCKET!,
+  region: process.env.AWS_REGION!,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  keyPrefix: 'avatars',
+});
+
+app.post('/api/profile', parser({ maxFileSize: 5 * 1024 * 1024 }), async (req, res) => {
+  try {
+    const { name, avatar } = req.payload;
+
+    const uploaded = await storage.upload(avatar);
+
+    res.json({
+      name,
+      avatarUrl: uploaded.url,
+      avatarKey: uploaded.key,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+```
+
+#### S3-compatible providers (MinIO, Cloudflare R2, etc.)
+
+Pass a custom `endpoint` to use any S3-compatible storage service:
+
+```typescript
+// MinIO
+const storage = createStorage({
+  provider: 'aws',
+  bucket: 'my-bucket',
+  region: 'us-east-1',
+  accessKeyId: process.env.MINIO_ACCESS_KEY!,
+  secretAccessKey: process.env.MINIO_SECRET_KEY!,
+  endpoint: 'http://localhost:9000',
+});
+
+// Cloudflare R2
+const storage = createStorage({
+  provider: 'aws',
+  bucket: 'my-bucket',
+  region: 'auto',
+  accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+  secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+  endpoint: `https://${process.env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+});
+```
+
 ## TypeScript Support
 
 Full TypeScript support with type inference:
 
 ```typescript
 import type { ParsedFile } from 'formdata-io/server';
+import type { UploadResult } from 'formdata-io/storage';
 
-app.post('/upload', parser(), (req, res) => {
+app.post('/upload', parser(), async (req, res) => {
   const avatar = req.payload?.avatar as ParsedFile;
 
   avatar.buffer;       // Buffer
   avatar.originalname; // string
   avatar.mimetype;     // string
   avatar.size;         // number
+
+  const result: UploadResult = await storage.upload(avatar);
+  result.url;          // string
+  result.key;          // string
 });
 ```
 
@@ -333,6 +597,7 @@ open examples/basic/client.html
 | TypeScript-first | ✅ | ⚠️ | ⚠️ | ❌ |
 | Zero config | ✅ | ❌ | ❌ | ✅ |
 | Auto-parsing | ✅ | ❌ | ❌ | N/A |
+| Cloud storage | ✅ | ❌ | ❌ | ❌ |
 | Bundle size | ~6KB | ~30KB | ~10KB | ~2KB |
 
 ## How It Works
@@ -358,23 +623,35 @@ The `payload()` function converts JavaScript objects to FormData by:
 The `parser()` middleware uses [busboy](https://github.com/mscdex/busboy) for stream-based parsing:
 
 1. **Stream processing**: Memory-efficient file handling
-2. **Size limits**: Enforced per-file and total limits
+2. **Size limits**: Enforced per-file, per-field, and total file size limits
 3. **Auto-parsing**: Automatic type conversion (JSON, numbers, booleans)
 4. **Array normalization**: Multiple values with same key become arrays
+
+### Storage Side
+
+The `createStorage()` factory returns a provider-agnostic `StorageAdapter`:
+
+1. **Unified interface**: Same `upload` / `uploadMany` / `delete` API across providers
+2. **Key generation**: Storage keys use `{prefix}/{uuid}-{sanitized-filename}` format, with NFD normalization to produce readable keys from accented filenames
+3. **Lazy loading**: The AWS SDK is loaded on first upload, keeping startup time unaffected if storage is unused
+4. **Input flexibility**: Accepts `ParsedFile`, raw `Buffer`, or base64 data URI as upload input
 
 ## Security
 
 **Built-in protections:**
 - ✅ File size limits (default: 10MB per file)
 - ✅ File count limits (default: 10 files max)
+- ✅ Text field limits (default: 100 fields, 64KB each)
+- ✅ Total file size limit (configurable via `maxTotalFileSize`)
 - ✅ Stream-based processing (no memory exhaustion)
 - ✅ Safe JSON parsing (fallback to string on error)
+- ✅ ReDoS protection for base64 parsing (regex runs in isolated `vm` context with 50ms timeout, throws `RegExpTimeoutError` on timeout)
+- ✅ Storage key sanitization (NFD normalization + accent stripping + alphanumeric enforcement prevents path traversal)
 
 **Your responsibility:**
 - ⚠️ File type validation (check `mimetype` and magic bytes)
-- ⚠️ Filename sanitization (prevent path traversal)
 - ⚠️ Virus scanning (if accepting user files)
-- ⚠️ Storage security (S3 permissions, disk quotas)
+- ⚠️ Storage permissions (S3 bucket policies, Supabase RLS)
 
 ## License
 
