@@ -27,4 +27,17 @@ export default defineConfig([
     external: ['busboy', 'express'],
     treeshake: true,
   },
+  // Storage build (Node.js)
+  {
+    entry: ['src/storage/index.ts'],
+    format: ['cjs', 'esm'],
+    dts: true,
+    sourcemap: true,
+    clean: false,
+    outDir: 'dist/storage',
+    platform: 'node',
+    target: 'node18',
+    external: ['@aws-sdk/client-s3'],
+    treeshake: true,
+  },
 ]);
