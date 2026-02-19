@@ -1,10 +1,7 @@
 import type { AWSStorageConfig, ResolvedInput, UploadResult } from '../types';
 import { generateKey } from '../utils';
 
-// Minimal local interfaces for @aws-sdk/client-s3 (optional peer dependency).
-// Defined here so the build does not require the SDK to be installed — consumers
-// who want AWS support install it separately per the peerDependencies declaration.
-
+// Local type interfaces for @aws-sdk/client-s3 (optional peer dependency).
 interface S3CredentialsConfig {
   accessKeyId: string;
   secretAccessKey: string;
@@ -46,17 +43,13 @@ interface AwsS3Module {
   DeleteObjectCommand: new (input: DeleteObjectCommandInput) => S3Command;
 }
 
-// Module-level SDK cache — Node.js also caches dynamic imports internally, but
-// caching the Promise here avoids re-running the try/catch wrapper on each call.
 let s3ModulePromise: Promise<AwsS3Module> | null = null;
 
 async function loadS3(): Promise<AwsS3Module> {
   if (!s3ModulePromise) {
-    // A runtime string variable prevents TypeScript from statically resolving
-    // this optional peer dependency at build time.
-    const pkg: string = '@aws-sdk/client-s3';
+    const pkg: string = '@aws-sdk/client-s3'; // variable prevents static resolution of optional peer dep
     s3ModulePromise = (import(pkg) as Promise<AwsS3Module>).catch((err) => {
-      s3ModulePromise = null; // allow retry if caller installs the SDK later
+      s3ModulePromise = null;
       void err;
       throw new Error(
         'AWS S3 SDK not found. Install it with: npm install @aws-sdk/client-s3'
@@ -75,7 +68,6 @@ function buildS3Client(
     secretAccessKey: config.secretAccessKey,
   };
 
-  // Fix #4: pass sessionToken for temporary credentials (STS / IAM roles)
   if (config.sessionToken) {
     credentials.sessionToken = config.sessionToken;
   }
@@ -97,14 +89,7 @@ export interface AwsProvider {
   delete(key: string): Promise<void>;
 }
 
-/**
- * Create a provider instance that caches the S3Client across upload/delete calls.
- *
- * Fix #8: a single S3Client is created lazily and reused for all operations on
- * this adapter instance instead of constructing a new client per request.
- */
 export function createAwsProvider(config: AWSStorageConfig): AwsProvider {
-  // Per-instance client cache. Lazily initialised on first use.
   let clientPromise: Promise<{ client: S3ClientInstance; sdk: AwsS3Module }> | null = null;
 
   function getClient(): Promise<{ client: S3ClientInstance; sdk: AwsS3Module }> {
@@ -112,7 +97,7 @@ export function createAwsProvider(config: AWSStorageConfig): AwsProvider {
       clientPromise = loadS3()
         .then((sdk) => ({ client: buildS3Client(config, sdk.S3Client), sdk }))
         .catch((err) => {
-          clientPromise = null; // allow retry
+          clientPromise = null;
           throw err;
         });
     }
@@ -140,7 +125,6 @@ export function createAwsProvider(config: AWSStorageConfig): AwsProvider {
     try {
       await client.send(new sdk.PutObjectCommand(putParams));
     } catch (err: unknown) {
-      // Fix #7: surface a clear message for the common ACL misconfiguration
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('AccessControlListNotSupported')) {
         throw new Error(

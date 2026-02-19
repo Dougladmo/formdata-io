@@ -6,7 +6,6 @@ export async function supabaseUpload(
   resolved: ResolvedInput,
   keyPrefix?: string
 ): Promise<UploadResult> {
-  // Fix #2: strip trailing slash to prevent double-slash in constructed URLs
   const baseUrl = config.url.replace(/\/$/, '');
 
   const prefix = keyPrefix ?? config.keyPrefix;
@@ -29,9 +28,6 @@ export async function supabaseUpload(
     throw new Error(`Supabase Storage upload failed (${response.status}): ${text}`);
   }
 
-  // Fix #3: only construct the public URL when the bucket is public (default: true).
-  // Private buckets require a signed URL — return the key so callers can generate one
-  // via `supabase.storage.from(bucket).createSignedUrl(key, expiresIn)`.
   const isPublic = config.publicBucket !== false;
   const url = isPublic
     ? `${baseUrl}/storage/v1/object/public/${config.bucket}/${key}`
@@ -49,7 +45,6 @@ export async function supabaseDelete(
   config: SupabaseStorageConfig,
   key: string
 ): Promise<void> {
-  // Fix #2: strip trailing slash
   const baseUrl = config.url.replace(/\/$/, '');
   const deleteUrl = `${baseUrl}/storage/v1/object/${config.bucket}`;
 

@@ -13,18 +13,8 @@ const DEFAULT_OPTIONS: Required<ParserOptions> = {
   autoParseBooleans: true,
 };
 
-/**
- * Type representing a single parsed value (not an array)
- */
 type ParsedValue = string | number | boolean | object | ParsedFile;
 
-/**
- * Normalizes a field into the payload, converting to array if needed
- *
- * @param payload - Current payload object
- * @param fieldname - Field name
- * @param value - Value to add (string, number, boolean, object, or ParsedFile)
- */
 function normalizeField(
   payload: ParsedPayload,
   fieldname: string,
@@ -33,7 +23,6 @@ function normalizeField(
   const existing = payload[fieldname];
 
   if (existing !== undefined) {
-    // Field already exists, convert to array
     if (Array.isArray(existing)) {
       (existing as ParsedValue[]).push(value);
     } else {
@@ -44,28 +33,10 @@ function normalizeField(
   }
 }
 
-/**
- * Attempts to automatically parse a string value to appropriate type
- *
- * Parsing order: JSON → Boolean → Number → String (fallback)
- *
- * @param value - String value to parse
- * @param options - Parser options controlling auto-conversion behavior
- * @returns Parsed value (JSON object, number, boolean, or original string)
- *
- * @example
- * ```typescript
- * autoParse('{"key":"value"}', opts) // → { key: "value" }
- * autoParse('true', opts) // → true
- * autoParse('123', opts) // → 123
- * autoParse('hello', opts) // → "hello"
- * ```
- */
 function autoParse(
   value: string,
   options: Required<ParserOptions>
 ): string | number | boolean | object {
-  // 1. Try JSON parsing (if starts/ends with {} or [])
   if (options.autoParseJSON) {
     if (
       (value.startsWith('{') && value.endsWith('}')) ||
@@ -74,12 +45,11 @@ function autoParse(
       try {
         return JSON.parse(value);
       } catch {
-        // Fallback to string if not valid JSON
+        // not valid JSON, continue
       }
     }
   }
 
-  // 2. Try number conversion (before boolean so "1"/"0" parse as numbers, not booleans)
   if (options.autoParseNumbers) {
     const num = Number(value);
     if (!isNaN(num) && value.trim() !== '') {
@@ -87,34 +57,14 @@ function autoParse(
     }
   }
 
-  // 3. Try boolean conversion (only for unambiguous string literals)
   if (options.autoParseBooleans) {
     if (value === 'true') return true;
     if (value === 'false') return false;
   }
 
-  // 4. Return as string
   return value;
 }
 
-/**
- * Parses multipart/form-data request using busboy
- *
- * @param req - Express request object
- * @param options - Parser configuration options
- * @returns Promise resolving to normalized payload
- *
- * @example
- * ```typescript
- * const payload = await parseMultipart(req, {
- *   maxFileSize: 5 * 1024 * 1024, // 5MB
- *   maxFiles: 5
- * });
- *
- * console.log(payload.name); // Auto-parsed text field
- * console.log(payload.avatar); // ParsedFile object
- * ```
- */
 export function parseMultipart(
   req: Request,
   options: Partial<ParserOptions> = {}
@@ -128,7 +78,6 @@ export function parseMultipart(
     let hasError = false;
     let totalFileSize = 0;
 
-    // Validate content-type header
     const contentType = req.headers['content-type'];
     if (!contentType || typeof contentType !== 'string') {
       return reject(new Error('Missing or invalid content-type header'));
@@ -144,13 +93,11 @@ export function parseMultipart(
       },
     });
 
-    // Handler for text fields
     busboy.on('field', (fieldname: string, value: string) => {
       const parsedValue = autoParse(value, opts);
       normalizeField(payload, fieldname, parsedValue);
     });
 
-    // Handler for file uploads
     busboy.on(
       'file',
       (
@@ -160,10 +107,9 @@ export function parseMultipart(
       ) => {
         fileCount++;
 
-        // Enforce file count limit
         if (fileCount > opts.maxFiles) {
           hasError = true;
-          file.resume(); // Drain stream to prevent backpressure
+          file.resume();
           reject(
             new Error(`Maximum number of files (${opts.maxFiles}) exceeded`)
           );
@@ -175,7 +121,6 @@ export function parseMultipart(
         let fileSizeExceeded = false;
 
         file.on('data', (chunk: Buffer) => {
-          // Skip processing if error already occurred
           if (hasError || fileSizeExceeded) {
             return;
           }
@@ -183,11 +128,10 @@ export function parseMultipart(
           size += chunk.length;
           totalFileSize += chunk.length;
 
-          // Enforce per-file size limit
           if (size > opts.maxFileSize) {
             fileSizeExceeded = true;
             hasError = true;
-            file.resume(); // Drain remaining stream data
+            file.resume();
             reject(
               new Error(
                 `File size exceeds limit of ${opts.maxFileSize} bytes`
@@ -196,7 +140,6 @@ export function parseMultipart(
             return;
           }
 
-          // Enforce total combined file size limit
           if (opts.maxTotalFileSize !== Infinity && totalFileSize > opts.maxTotalFileSize) {
             fileSizeExceeded = true;
             hasError = true;
@@ -213,7 +156,6 @@ export function parseMultipart(
         });
 
         file.on('end', () => {
-          // Only add file if no errors occurred
           if (!hasError && !fileSizeExceeded) {
             const parsedFile: ParsedFile = {
               fieldname,
@@ -235,18 +177,15 @@ export function parseMultipart(
       }
     );
 
-    // Handler for limit exceeded (busboy emits this when fileSize limit is hit)
     busboy.on('limit', () => {
-      if (hasError) return; // avoid double-reject when data handler already rejected
+      if (hasError) return;
       hasError = true;
       reject(new Error('File size limit exceeded'));
     });
 
-    // Handler for parsing completion
     busboy.on('finish', () => {
       if (hasError) return;
 
-      // Normalize files into payload
       files.forEach((file) => {
         normalizeField(payload, file.fieldname, file);
       });
@@ -254,10 +193,8 @@ export function parseMultipart(
       resolve(payload);
     });
 
-    // Handler for parsing errors
     busboy.on('error', reject);
 
-    // Pipe request stream to busboy
     req.pipe(busboy);
   });
 }

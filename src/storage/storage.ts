@@ -28,27 +28,10 @@ function validateConfig(config: StorageConfig): void {
   }
 }
 
-/**
- * Create a storage adapter for the specified provider.
- *
- * @example
- * ```typescript
- * const storage = createStorage({
- *   provider: 'aws',
- *   bucket: 'my-bucket',
- *   region: 'us-east-1',
- *   accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
- *   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
- * })
- *
- * const result = await storage.upload(req.payload.avatar)
- * ```
- */
 export function createStorage(config: StorageConfig): StorageAdapter {
   validateConfig(config);
 
   if (config.provider === 'aws') {
-    // Fix #8: S3Client is created once and reused across all upload/delete calls
     const aws = createAwsProvider(config);
 
     const upload = async (input: UploadInput, options?: UploadOptions): Promise<UploadResult> => {
@@ -64,7 +47,6 @@ export function createStorage(config: StorageConfig): StorageAdapter {
     return { upload, uploadMany, delete: aws.delete };
   }
 
-  // config is narrowed to SupabaseStorageConfig here
   const upload = async (input: UploadInput, options?: UploadOptions): Promise<UploadResult> => {
     const resolved = resolveInput(input, options);
     return supabaseUpload(config, resolved, options?.keyPrefix);

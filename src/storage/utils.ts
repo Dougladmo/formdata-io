@@ -3,12 +3,10 @@ import vm from 'node:vm';
 import type { ParsedFile } from '../server/types';
 import type { ResolvedInput, UploadInput, UploadOptions } from './types';
 
-const DATA_URI_MAX_LENGTH = 100 * 1024 * 1024; // 100 MB — evita abuso de memória
-const REGEX_TIMEOUT_MS = 50; // 50 ms é mais que suficiente para um data URI válido
+const DATA_URI_MAX_LENGTH = 100 * 1024 * 1024; // 100 MB
+const REGEX_TIMEOUT_MS = 50;
 
-// Fix #9: compile the VM script once at module load instead of re-compiling on every call.
-// vm.createContext() is still called per-invocation to provide an isolated sandbox,
-// but script compilation is the expensive part and is now shared.
+// Compiled once at module load; vm.createContext() is called per-invocation for isolation.
 const VM_REGEX_SCRIPT = new vm.Script('input.match(pattern)');
 
 export class RegExpTimeoutError extends Error {
@@ -18,11 +16,7 @@ export class RegExpTimeoutError extends Error {
   }
 }
 
-/**
- * Executa um regex com timeout real via vm.runInNewContext.
- * Lança RegExpTimeoutError se o tempo limite for excedido,
- * impedindo ataques de ReDoS em entradas maliciosas.
- */
+// Runs a regex with a real timeout via vm.runInNewContext, preventing ReDoS attacks.
 function execRegex(
   input: string,
   pattern: RegExp,
@@ -45,27 +39,18 @@ function execRegex(
   }
 }
 
-/**
- * Sanitize a filename to be safe for use in storage keys.
- * Transliterates Latin-based accented characters (é → e, ñ → n, ü → u, etc.)
- * via Unicode NFD decomposition before stripping non-ASCII characters, so that
- * accented filenames produce a readable result instead of silent truncation.
- * Non-Latin scripts (CJK, Arabic, etc.) that cannot be decomposed to ASCII are
- * still removed; the UUID prefix in the generated key ensures uniqueness.
- */
+// Uses NFD decomposition to transliterate accented chars (é → e) before stripping non-ASCII,
+// so accented filenames produce readable keys instead of empty strings.
 function sanitizeFilename(filename: string): string {
   return filename
-    .normalize('NFD')                   // decompose accented chars (é → e + ́)
-    .replace(/[\u0300-\u036f]/g, '')    // strip combining diacritical marks
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/\s+/g, '-')
     .replace(/[^a-z0-9._-]/g, '');
 }
 
-/**
- * Generate a unique storage key.
- * Format: {prefix}/{uuid}-{sanitized-filename}
- */
+/** Format: {prefix}/{uuid}-{sanitized-filename} */
 export function generateKey(filename: string, prefix?: string): string {
   const uuid = randomUUID();
   const sanitized = sanitizeFilename(filename);
@@ -77,10 +62,7 @@ export function generateKey(filename: string, prefix?: string): string {
   return name;
 }
 
-/**
- * Convert a base64 data URI to a Buffer with MIME type.
- * Expects format: data:{mimetype};base64,{data}
- */
+/** Parses a base64 data URI into a Buffer and MIME type. */
 export function base64ToBuffer(dataUri: string): { buffer: Buffer; mimetype: string } {
   const match = execRegex(dataUri, /^data:([^;]+);base64,(.+)$/);
   if (!match) {
@@ -101,9 +83,7 @@ function isParsedFile(input: UploadInput): input is ParsedFile {
   );
 }
 
-/**
- * Normalize any UploadInput into a ResolvedInput with buffer, filename, mimetype, and size.
- */
+/** Normalizes any UploadInput into a ResolvedInput with buffer, filename, mimetype, and size. */
 export function resolveInput(input: UploadInput, options?: UploadOptions): ResolvedInput {
   if (isParsedFile(input)) {
     return {
